@@ -23,20 +23,24 @@ concurrency:
   cancel-in-progress: true
 jobs:
   compile_and_test:
-    uses: ./.github/workflows/common.yml
     strategy:
       matrix:
-        flink: [1.18.1, 1.19.0]
+        include:
+          - flink: 1.18.1
+            jdk: '8, 11'
+          - flink: 1.19.0
+            jdk: '8, 11'
+          - flink: 1.20-SNAPSHOT
+            jdk: '8, 11'
+    uses: apache/flink-connector-shared-utils/.github/workflows/ci.yml@ci_utils
     with:
       flink_version: ${{ matrix.flink }}
-      flink_url: https://archive.apache.org/dist/flink/flink-${{ matrix.flink }}/flink-${{ matrix.flink }}-bin-scala_2.12.tgz
-      cache_flink_binary: true
-    secrets: inherit
+      jdk_version: ${{ matrix.jdk }}
 
   python_test:
     strategy:
       matrix:
-        flink: [1.18.1, 1.19.0]
+        flink: [ 1.18.1, 1.19.0, 1.20-SNAPSHOT ]
     uses: apache/flink-connector-shared-utils/.github/workflows/python_ci.yml@ci_utils
     with:
       flink_version: ${{ matrix.flink }}

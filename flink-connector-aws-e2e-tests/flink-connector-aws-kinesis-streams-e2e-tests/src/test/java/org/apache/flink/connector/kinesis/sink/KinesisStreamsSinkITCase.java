@@ -39,6 +39,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.api.parallel.Execution;
 import org.junit.jupiter.api.parallel.ExecutionMode;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import software.amazon.awssdk.http.SdkHttpClient;
 import software.amazon.awssdk.services.kinesis.KinesisClient;
 import software.amazon.awssdk.services.kinesis.model.GetRecordsRequest;
@@ -68,6 +70,8 @@ class KinesisStreamsSinkITCase {
     private KinesisClient kinesisClient;
     private AWSKinesisResourceManager kinesisResourceManager;
 
+    private static final Logger logger = LoggerFactory.getLogger(KinesisStreamsSinkITCase.class);
+
     @BeforeEach
     void setUp() {
         env = StreamExecutionEnvironment.getExecutionEnvironment();
@@ -87,12 +91,14 @@ class KinesisStreamsSinkITCase {
 
     @Test
     void elementsMaybeWrittenSuccessfullyToLocalInstanceWhenBatchSizeIsReached() throws Exception {
+        logger.info("AWS E2E test");
         new Scenario().runScenario();
     }
 
     @Test
     void elementsBufferedAndTriggeredByTimeBasedFlushShouldBeFlushedIfSourcedIsKeptAlive()
             throws Exception {
+        logger.info("AWS E2E test");
         new Scenario()
                 .withNumberOfElementsToSend(10)
                 .withMaxBatchSize(100)
@@ -102,6 +108,7 @@ class KinesisStreamsSinkITCase {
 
     @Test
     void veryLargeMessagesSucceedInBeingPersisted() throws Exception {
+        logger.info("AWS E2E test");
         new Scenario()
                 .withNumberOfElementsToSend(5)
                 .withSizeOfMessageBytes(2500)
@@ -112,6 +119,7 @@ class KinesisStreamsSinkITCase {
 
     @Test
     void multipleInFlightRequestsResultsInCorrectNumberOfElementsPersisted() throws Exception {
+        logger.info("AWS E2E test");
         new Scenario()
                 .withNumberOfElementsToSend(150)
                 .withSizeOfMessageBytes(2500)
@@ -124,16 +132,19 @@ class KinesisStreamsSinkITCase {
 
     @Test
     void nonExistentStreamNameShouldResultInFailureInFailOnErrorIsOn() {
+        logger.info("AWS E2E test");
         testJobFatalFailureTerminatesCorrectlyWithFailOnErrorFlagSetTo(true);
     }
 
     @Test
     void nonExistentStreamNameShouldResultInFailureInFailOnErrorIsOff() {
+        logger.info("AWS E2E test");
         testJobFatalFailureTerminatesCorrectlyWithFailOnErrorFlagSetTo(false);
     }
 
     private void testJobFatalFailureTerminatesCorrectlyWithFailOnErrorFlagSetTo(
             boolean failOnError) {
+        logger.info("AWS E2E test");
         Assertions.assertThatExceptionOfType(JobExecutionException.class)
                 .isThrownBy(
                         () ->
@@ -150,6 +161,7 @@ class KinesisStreamsSinkITCase {
 
     @Test
     void veryLargeMessagesFailGracefullyWithBrokenElementConverter() {
+        logger.info("AWS E2E test");
         Assertions.assertThatExceptionOfType(JobExecutionException.class)
                 .isThrownBy(
                         () ->

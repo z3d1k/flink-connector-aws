@@ -20,18 +20,31 @@ name: "flink-connector-aws: nightly build"
 on:
   schedule:
     - cron: "0 0 * * *"
+  workflow_dispatch:
 jobs:
   compile_and_test:
-    if: github.repository_owner == 'apache'
+#    if: github.repository_owner == 'apache'
     strategy:
       matrix:
-        flink: [1.18-SNAPSHOT, 1.19-SNAPSHOT, 1.20-SNAPSHOT]
-    uses: ./.github/workflows/common.yml
+        flink_branches: [{
+          flink: 1.18-SNAPSHOT,
+          branch: main,
+          skip_archunit_tests: false
+        }, {
+          flink: 1.19-SNAPSHOT,
+          branch: main,
+          skip_archunit_tests: false
+        }, {
+          flink: 1.20-SNAPSHOT,
+          branch: main,
+        }]
+    uses: apache/flink-connector-shared-utils/.github/workflows/ci.yml@ci_utils
     with:
-      flink_version: ${{ matrix.flink }}
-      flink_url: https://s3.amazonaws.com/flink-nightly/flink-${{ matrix.flink }}-bin-scala_2.12.tgz
-      cache_flink_binary: false
-    secrets: inherit
+      flink_version: ${{ matrix.flink_branches.flink }}
+      connector_branch: ${{ matrix.flink_branches.branch }}
+      jdk_version: ${{ matrix.flink_branches.jdk || '8, 11' }}
+      run_dependency_convergence: false
+      skip_archunit_tests: ${{ matrix.flink_branches.skip_archunit_tests || true }}
 
   python_test:
     strategy:
@@ -40,3 +53,13 @@ jobs:
     uses: apache/flink-connector-shared-utils/.github/workflows/python_ci.yml@ci_utils
     with:
       flink_version: ${{ matrix.flink }}
+
+  aws_e2e_test:
+    needs: [ compile_and_test ]
+    uses: ./.github/workflows/e2e_workflow.yml
+    strategy:
+      matrix:
+        flink: [ 1.17-SNAPSHOT, 1.18-SNAPSHOT, 1.19-SNAPSHOT ]
+    with:
+      flink_version: ${{ matrix.flink }}
+    secrets: inherit

@@ -42,8 +42,7 @@ public class SourceFromKinesis {
         sourceConfig.setString(AWSConfigConstants.AWS_REGION, "us-east-1");
         KinesisStreamsSource<String> kdsSource =
                 KinesisStreamsSource.<String>builder()
-                        .setStreamArn(
-                                "arn:aws:kinesis:us-east-1:290038087681:stream/LoadTestBeta_Input_35")
+                        .setStreamArn("arn:aws:kinesis:us-east-1:000000000000:stream/testing")
                         .setSourceConfig(sourceConfig)
                         .setDeserializationSchema(new SimpleStringSchema())
                         .setKinesisShardAssigner(ShardAssignerFactory.uniformShardAssigner())

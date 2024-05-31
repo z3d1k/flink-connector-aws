@@ -27,6 +27,7 @@ import org.apache.flink.api.connector.source.SourceReaderContext;
 import org.apache.flink.api.connector.source.SplitEnumerator;
 import org.apache.flink.api.connector.source.SplitEnumeratorContext;
 import org.apache.flink.configuration.Configuration;
+import org.apache.flink.connector.aws.config.AWSConfigConstants;
 import org.apache.flink.connector.aws.util.AWSClientUtil;
 import org.apache.flink.connector.aws.util.AWSGeneralUtil;
 import org.apache.flink.connector.base.source.reader.RecordsWithSplitIds;
@@ -41,6 +42,7 @@ import org.apache.flink.connector.kinesis.source.proxy.KinesisStreamProxy;
 import org.apache.flink.connector.kinesis.source.reader.KinesisStreamsRecordEmitter;
 import org.apache.flink.connector.kinesis.source.reader.KinesisStreamsSourceReader;
 import org.apache.flink.connector.kinesis.source.reader.PollingKinesisShardSplitReader;
+import org.apache.flink.connector.kinesis.source.reader.RecordWrapper;
 import org.apache.flink.connector.kinesis.source.serialization.KinesisDeserializationSchema;
 import org.apache.flink.connector.kinesis.source.split.KinesisShardSplit;
 import org.apache.flink.connector.kinesis.source.split.KinesisShardSplitSerializer;
@@ -49,10 +51,10 @@ import org.apache.flink.metrics.MetricGroup;
 import org.apache.flink.util.Preconditions;
 import org.apache.flink.util.UserCodeClassLoader;
 
+import software.amazon.awssdk.arns.Arn;
 import software.amazon.awssdk.http.SdkHttpClient;
 import software.amazon.awssdk.http.apache.ApacheHttpClient;
 import software.amazon.awssdk.services.kinesis.KinesisClient;
-import software.amazon.awssdk.services.kinesis.model.Record;
 import software.amazon.awssdk.utils.AttributeMap;
 
 import java.util.Properties;
@@ -122,7 +124,7 @@ public class KinesisStreamsSource<T>
             throws Exception {
         setUpDeserializationSchema(readerContext);
 
-        FutureCompletingBlockingQueue<RecordsWithSplitIds<Record>> elementsQueue =
+        FutureCompletingBlockingQueue<RecordsWithSplitIds<RecordWrapper>> elementsQueue =
                 new FutureCompletingBlockingQueue<>();
         // We create a new stream proxy for each split reader since they have their own independent
         // lifecycle.
@@ -133,7 +135,8 @@ public class KinesisStreamsSource<T>
 
         return new KinesisStreamsSourceReader<>(
                 elementsQueue,
-                new SingleThreadFetcherManager<>(elementsQueue, splitReaderSupplier::get),
+                new SingleThreadFetcherManager<>(
+                        elementsQueue, splitReaderSupplier::get, sourceConfig),
                 recordEmitter,
                 sourceConfig,
                 readerContext);
@@ -141,7 +144,7 @@ public class KinesisStreamsSource<T>
 
     @Override
     public SplitEnumerator<KinesisShardSplit, KinesisStreamsSourceEnumeratorState> createEnumerator(
-            SplitEnumeratorContext<KinesisShardSplit> enumContext) throws Exception {
+            SplitEnumeratorContext<KinesisShardSplit> enumContext) {
         return restoreEnumerator(enumContext, null);
     }
 
@@ -149,8 +152,7 @@ public class KinesisStreamsSource<T>
     public SplitEnumerator<KinesisShardSplit, KinesisStreamsSourceEnumeratorState>
             restoreEnumerator(
                     SplitEnumeratorContext<KinesisShardSplit> enumContext,
-                    KinesisStreamsSourceEnumeratorState checkpoint)
-                    throws Exception {
+                    KinesisStreamsSourceEnumeratorState checkpoint) {
         return new KinesisStreamsSourceEnumerator(
                 enumContext,
                 streamArn,
@@ -176,6 +178,16 @@ public class KinesisStreamsSource<T>
                 AWSGeneralUtil.createSyncHttpClient(
                         AttributeMap.builder().build(), ApacheHttpClient.builder());
 
+        if (!consumerConfig.containsKey(AWSConfigConstants.AWS_REGION)) {
+            String region =
+                    Arn.fromString(streamArn)
+                            .region()
+                            .orElseThrow(
+                                    () ->
+                                            new IllegalStateException(
+                                                    "Unable to determine region from stream arn"));
+            consumerConfig.setString(AWSConfigConstants.AWS_REGION, region);
+        }
         Properties kinesisClientProperties = new Properties();
         consumerConfig.addAllToProperties(kinesisClientProperties);
 

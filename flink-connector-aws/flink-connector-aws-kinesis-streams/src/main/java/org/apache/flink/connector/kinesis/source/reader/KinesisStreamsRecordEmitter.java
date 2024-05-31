@@ -36,7 +36,7 @@ import software.amazon.awssdk.services.kinesis.model.Record;
  */
 @Internal
 public class KinesisStreamsRecordEmitter<T>
-        implements RecordEmitter<Record, T, KinesisShardSplitState> {
+        implements RecordEmitter<RecordWrapper, T, KinesisShardSplitState> {
 
     private final KinesisDeserializationSchema<T> deserializationSchema;
     private final SourceOutputWrapper<T> sourceOutputWrapper = new SourceOutputWrapper<>();
@@ -47,14 +47,22 @@ public class KinesisStreamsRecordEmitter<T>
 
     @Override
     public void emitRecord(
-            Record element, SourceOutput<T> output, KinesisShardSplitState splitState)
+            RecordWrapper element, SourceOutput<T> output, KinesisShardSplitState splitState)
             throws Exception {
-        sourceOutputWrapper.setSourceOutput(output);
-        sourceOutputWrapper.setTimestamp(element.approximateArrivalTimestamp().toEpochMilli());
-        deserializationSchema.deserialize(
-                element, splitState.getStreamArn(), splitState.getShardId(), sourceOutputWrapper);
-        splitState.setNextStartingPosition(
-                StartingPosition.continueFromSequenceNumber(element.sequenceNumber()));
+        if (element.hasRecord()) {
+            Record record = element.getRecord();
+            sourceOutputWrapper.setSourceOutput(output);
+            sourceOutputWrapper.setTimestamp(record.approximateArrivalTimestamp().toEpochMilli());
+            deserializationSchema.deserialize(
+                    record,
+                    splitState.getStreamArn(),
+                    splitState.getShardId(),
+                    sourceOutputWrapper);
+            splitState.setNextStartingPosition(
+                    StartingPosition.continueFromSequenceNumber(record.sequenceNumber()));
+        } else {
+            splitState.setChildShards(element.getChildShards());
+        }
     }
 
     private static class SourceOutputWrapper<T> implements Collector<T> {

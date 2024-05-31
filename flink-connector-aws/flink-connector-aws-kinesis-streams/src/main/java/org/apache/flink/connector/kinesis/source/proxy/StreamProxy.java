@@ -19,12 +19,11 @@
 package org.apache.flink.connector.kinesis.source.proxy;
 
 import org.apache.flink.annotation.Internal;
+import org.apache.flink.configuration.Configuration;
 import org.apache.flink.connector.kinesis.source.split.StartingPosition;
 
 import software.amazon.awssdk.services.kinesis.model.GetRecordsResponse;
 import software.amazon.awssdk.services.kinesis.model.Shard;
-
-import javax.annotation.Nullable;
 
 import java.io.Closeable;
 import java.util.List;
@@ -37,11 +36,11 @@ public interface StreamProxy extends Closeable {
      * Obtains the shards associated with a given stream.
      *
      * @param streamArn the ARN of the stream
-     * @param lastSeenShardId the last seen shard Id. Used for reducing the number of results
+     * @param configuration the last seen shard Id. Used for reducing the number of results
      *     returned.
      * @return shard list
      */
-    List<Shard> listShards(String streamArn, @Nullable String lastSeenShardId);
+    List<Shard> listShards(String streamArn, Configuration configuration);
 
     /**
      * Retrieves records from the stream.

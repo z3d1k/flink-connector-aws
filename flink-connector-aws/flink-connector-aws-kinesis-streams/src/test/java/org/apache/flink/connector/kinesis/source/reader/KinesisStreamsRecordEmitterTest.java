@@ -80,7 +80,7 @@ class KinesisStreamsRecordEmitterTest {
         KinesisStreamsRecordEmitter<String> emitter =
                 new KinesisStreamsRecordEmitter<>(KinesisDeserializationSchema.of(STRING_SCHEMA));
         for (Record record : inputRecords) {
-            emitter.emitRecord(record, output, splitState);
+            emitter.emitRecord(RecordWrapper.record(record), output, splitState);
         }
 
         assertThat(output.getEmittedRecords()).containsExactly("data-1", "data-2", "data-3");
@@ -127,7 +127,7 @@ class KinesisStreamsRecordEmitterTest {
         KinesisStreamsRecordEmitter<String> emitter =
                 new KinesisStreamsRecordEmitter<>(new SequenceNumberBasedDeserializationSchema());
         for (Record record : inputRecords) {
-            emitter.emitRecord(record, output, splitState);
+            emitter.emitRecord(RecordWrapper.record(record), output, splitState);
         }
 
         assertThat(output.getEmittedRecords()).containsExactly("data-1", "data-2");
@@ -169,7 +169,7 @@ class KinesisStreamsRecordEmitterTest {
                         new AssertRecordMetadataDeserializationSchema(
                                 splitState.getStreamArn(), splitState.getShardId()));
         for (Record record : inputRecords) {
-            emitter.emitRecord(record, output, splitState);
+            emitter.emitRecord(RecordWrapper.record(record), output, splitState);
         }
 
         assertThat(output.getEmittedRecords()).containsExactly("data-1", "data-2", "data-3");

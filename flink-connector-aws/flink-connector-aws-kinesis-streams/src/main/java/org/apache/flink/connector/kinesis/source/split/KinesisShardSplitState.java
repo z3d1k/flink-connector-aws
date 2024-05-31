@@ -20,6 +20,8 @@ package org.apache.flink.connector.kinesis.source.split;
 
 import org.apache.flink.annotation.Internal;
 
+import java.util.List;
+
 /**
  * Stores the metadata around a given {@link KinesisShardSplit}. This class is stored in state, and
  * any changes should be backwards compatible.
@@ -29,6 +31,7 @@ public class KinesisShardSplitState {
     private final KinesisShardSplit kinesisShardSplit;
     private StartingPosition nextStartingPosition;
     private String nextShardIterator;
+    private List<ChildShard> childShards;
 
     public KinesisShardSplitState(KinesisShardSplit kinesisShardSplit) {
         this.kinesisShardSplit = kinesisShardSplit;
@@ -68,5 +71,13 @@ public class KinesisShardSplitState {
 
     public void setNextShardIterator(String nextShardIterator) {
         this.nextShardIterator = nextShardIterator;
+    }
+
+    public List<ChildShard> getChildShards() {
+        return childShards;
+    }
+
+    public void setChildShards(List<ChildShard> childShards) {
+        this.childShards = childShards;
     }
 }

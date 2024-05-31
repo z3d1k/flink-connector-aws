@@ -23,6 +23,7 @@ import org.apache.flink.connector.base.source.reader.RecordsWithSplitIds;
 import org.apache.flink.connector.base.source.reader.splitreader.SplitReader;
 import org.apache.flink.connector.base.source.reader.splitreader.SplitsChange;
 import org.apache.flink.connector.kinesis.source.proxy.StreamProxy;
+import org.apache.flink.connector.kinesis.source.split.ChildShard;
 import org.apache.flink.connector.kinesis.source.split.KinesisShardSplit;
 import org.apache.flink.connector.kinesis.source.split.KinesisShardSplitState;
 import org.apache.flink.connector.kinesis.source.split.StartingPosition;
@@ -34,9 +35,11 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.ArrayDeque;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Deque;
 import java.util.Iterator;
+import java.util.List;
 import java.util.Set;
 
 import static java.util.Collections.singleton;
@@ -46,10 +49,11 @@ import static java.util.Collections.singleton;
  * records.
  */
 @Internal
-public class PollingKinesisShardSplitReader implements SplitReader<Record, KinesisShardSplit> {
+public class PollingKinesisShardSplitReader
+        implements SplitReader<RecordWrapper, KinesisShardSplit> {
 
-    private static final RecordsWithSplitIds<Record> INCOMPLETE_SHARD_EMPTY_RECORDS =
-            new KinesisRecordsWithSplitIds(Collections.emptyIterator(), null, false);
+    private static final RecordsWithSplitIds<RecordWrapper> INCOMPLETE_SHARD_EMPTY_RECORDS =
+            new KinesisRecordsWithSplitIds(Collections.emptyIterator(), null, false, null);
 
     private final StreamProxy kinesis;
     private final Deque<KinesisShardSplitState> assignedSplits = new ArrayDeque<>();
@@ -59,7 +63,7 @@ public class PollingKinesisShardSplitReader implements SplitReader<Record, Kines
     }
 
     @Override
-    public RecordsWithSplitIds<Record> fetch() throws IOException {
+    public RecordsWithSplitIds<RecordWrapper> fetch() throws IOException {
         KinesisShardSplitState splitState = assignedSplits.poll();
         if (splitState == null) {
             return INCOMPLETE_SHARD_EMPTY_RECORDS;
@@ -71,11 +75,12 @@ public class PollingKinesisShardSplitReader implements SplitReader<Record, Kines
                         splitState.getShardId(),
                         splitState.getNextStartingPosition());
         boolean isComplete = getRecordsResponse.nextShardIterator() == null;
+        List<ChildShard> childShards = mapChildShards(getRecordsResponse.childShards());
 
         if (hasNoRecords(getRecordsResponse)) {
             if (isComplete) {
                 return new KinesisRecordsWithSplitIds(
-                        Collections.emptyIterator(), splitState.getSplitId(), true);
+                        Collections.emptyIterator(), splitState.getSplitId(), true, childShards);
             } else {
                 assignedSplits.add(splitState);
                 return INCOMPLETE_SHARD_EMPTY_RECORDS;
@@ -90,8 +95,22 @@ public class PollingKinesisShardSplitReader implements SplitReader<Record, Kines
                                 .sequenceNumber()));
 
         assignedSplits.add(splitState);
+
         return new KinesisRecordsWithSplitIds(
-                getRecordsResponse.records().iterator(), splitState.getSplitId(), isComplete);
+                getRecordsResponse.records().iterator(),
+                splitState.getSplitId(),
+                isComplete,
+                childShards);
+    }
+
+    private List<ChildShard> mapChildShards(
+            List<software.amazon.awssdk.services.kinesis.model.ChildShard> childShards) {
+        if (childShards == null || childShards.isEmpty()) {
+            return null;
+        }
+        ArrayList<ChildShard> result = new ArrayList<>();
+        childShards.forEach(childShard -> result.add(new ChildShard(childShard)));
+        return result;
     }
 
     private boolean hasNoRecords(GetRecordsResponse getRecordsResponse) {
@@ -115,29 +134,43 @@ public class PollingKinesisShardSplitReader implements SplitReader<Record, Kines
         kinesis.close();
     }
 
-    private static class KinesisRecordsWithSplitIds implements RecordsWithSplitIds<Record> {
+    private static class KinesisRecordsWithSplitIds implements RecordsWithSplitIds<RecordWrapper> {
 
         private final Iterator<Record> recordsIterator;
         private final String splitId;
         private final boolean isComplete;
+        private final List<ChildShard> childShards;
+
+        private boolean finishMarkerSent = false;
 
         public KinesisRecordsWithSplitIds(
-                Iterator<Record> recordsIterator, String splitId, boolean isComplete) {
+                Iterator<Record> recordsIterator,
+                String splitId,
+                boolean isComplete,
+                List<ChildShard> childShards) {
             this.recordsIterator = recordsIterator;
             this.splitId = splitId;
             this.isComplete = isComplete;
+            this.childShards = childShards;
         }
 
         @Nullable
         @Override
         public String nextSplit() {
-            return recordsIterator.hasNext() ? splitId : null;
+            return recordsIterator.hasNext() || (isComplete && !finishMarkerSent) ? splitId : null;
         }
 
         @Nullable
         @Override
-        public Record nextRecordFromSplit() {
-            return recordsIterator.hasNext() ? recordsIterator.next() : null;
+        public RecordWrapper nextRecordFromSplit() {
+            if (recordsIterator.hasNext()) {
+                return RecordWrapper.record(recordsIterator.next());
+            }
+            if (isComplete && !finishMarkerSent) {
+                finishMarkerSent = true;
+                return RecordWrapper.finishMarker(childShards);
+            }
+            return null;
         }
 
         @Override

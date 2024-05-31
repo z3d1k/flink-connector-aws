@@ -26,10 +26,12 @@ import org.apache.flink.connector.base.source.reader.RecordsWithSplitIds;
 import org.apache.flink.connector.base.source.reader.SingleThreadMultiplexSourceReaderBase;
 import org.apache.flink.connector.base.source.reader.fetcher.SingleThreadFetcherManager;
 import org.apache.flink.connector.base.source.reader.synchronization.FutureCompletingBlockingQueue;
+import org.apache.flink.connector.kinesis.source.SplitFinishedEvent;
 import org.apache.flink.connector.kinesis.source.split.KinesisShardSplit;
 import org.apache.flink.connector.kinesis.source.split.KinesisShardSplitState;
 
-import software.amazon.awssdk.services.kinesis.model.Record;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.Map;
 
@@ -41,12 +43,13 @@ import java.util.Map;
 @Internal
 public class KinesisStreamsSourceReader<T>
         extends SingleThreadMultiplexSourceReaderBase<
-                Record, T, KinesisShardSplit, KinesisShardSplitState> {
+                RecordWrapper, T, KinesisShardSplit, KinesisShardSplitState> {
+    private static final Logger LOG = LoggerFactory.getLogger(KinesisStreamsSourceReader.class);
 
     public KinesisStreamsSourceReader(
-            FutureCompletingBlockingQueue<RecordsWithSplitIds<Record>> elementsQueue,
-            SingleThreadFetcherManager<Record, KinesisShardSplit> splitFetcherManager,
-            RecordEmitter<Record, T, KinesisShardSplitState> recordEmitter,
+            FutureCompletingBlockingQueue<RecordsWithSplitIds<RecordWrapper>> elementsQueue,
+            SingleThreadFetcherManager<RecordWrapper, KinesisShardSplit> splitFetcherManager,
+            RecordEmitter<RecordWrapper, T, KinesisShardSplitState> recordEmitter,
             Configuration config,
             SourceReaderContext context) {
         super(elementsQueue, splitFetcherManager, recordEmitter, config, context);
@@ -54,7 +57,13 @@ public class KinesisStreamsSourceReader<T>
 
     @Override
     protected void onSplitFinished(Map<String, KinesisShardSplitState> finishedSplitIds) {
-        // no-op. We don't need to do anything on finished split now
+        LOG.debug(
+                "Received split finished event for splits [{}]",
+                String.join(",", finishedSplitIds.keySet()));
+        for (Map.Entry<String, KinesisShardSplitState> entry : finishedSplitIds.entrySet()) {
+            context.sendSourceEventToCoordinator(
+                    new SplitFinishedEvent(entry.getKey(), entry.getValue().getChildShards()));
+        }
     }
 
     @Override

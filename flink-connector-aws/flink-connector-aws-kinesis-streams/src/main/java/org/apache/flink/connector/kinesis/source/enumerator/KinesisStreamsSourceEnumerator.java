@@ -20,13 +20,16 @@ package org.apache.flink.connector.kinesis.source.enumerator;
 
 import org.apache.flink.annotation.Internal;
 import org.apache.flink.api.connector.source.ReaderInfo;
+import org.apache.flink.api.connector.source.SourceEvent;
 import org.apache.flink.api.connector.source.SplitEnumerator;
 import org.apache.flink.api.connector.source.SplitEnumeratorContext;
 import org.apache.flink.api.connector.source.SplitsAssignment;
 import org.apache.flink.configuration.Configuration;
+import org.apache.flink.connector.kinesis.source.SplitFinishedEvent;
 import org.apache.flink.connector.kinesis.source.config.KinesisStreamsSourceConfigConstants.InitialPosition;
 import org.apache.flink.connector.kinesis.source.exception.KinesisStreamsSourceException;
 import org.apache.flink.connector.kinesis.source.proxy.StreamProxy;
+import org.apache.flink.connector.kinesis.source.split.ChildShard;
 import org.apache.flink.connector.kinesis.source.split.KinesisShardSplit;
 import org.apache.flink.connector.kinesis.source.split.StartingPosition;
 
@@ -71,6 +74,8 @@ public class KinesisStreamsSourceEnumerator
     private final Map<Integer, Set<KinesisShardSplit>> splitAssignment = new HashMap<>();
     private final Set<String> assignedSplitIds = new HashSet<>();
     private final Set<KinesisShardSplit> unassignedSplits;
+    private final Set<String> finishedSplits;
+    private final Map<String, Set<String>> waitingForParent = new HashMap<>();
 
     private String lastSeenShardId;
 
@@ -94,6 +99,8 @@ public class KinesisStreamsSourceEnumerator
             this.lastSeenShardId = state.getLastSeenShardId();
             this.unassignedSplits = state.getUnassignedSplits();
         }
+        // TODO: Store in state
+        this.finishedSplits = new HashSet<>();
     }
 
     @Override
@@ -113,6 +120,40 @@ public class KinesisStreamsSourceEnumerator
     @Override
     public void handleSplitRequest(int subtaskId, @Nullable String requesterHostname) {
         // Do nothing, since we assign splits eagerly
+    }
+
+    private void unassignSplitId(int subtaskId, String splitId) {
+        finishedSplits.add(splitId);
+        assignedSplitIds.remove(splitId);
+        splitAssignment.get(subtaskId).removeIf(split -> split.splitId().equals(splitId));
+    }
+
+    @Override
+    public void handleSourceEvent(int subtaskId, SourceEvent sourceEvent) {
+        LOG.debug("Received event {} from subtask with id {}", sourceEvent.toString(), subtaskId);
+        if (sourceEvent instanceof SplitFinishedEvent) {
+            SplitFinishedEvent event = (SplitFinishedEvent) sourceEvent;
+            unassignSplitId(subtaskId, event.getSplitId());
+
+            List<ChildShard> childShards = event.getChildShards();
+            if (childShards != null) {
+                childShards.forEach(
+                        childShard -> {
+                            if (childShard.getParentShards() == null) {
+                                return;
+                            }
+                            boolean allParentsCompleted =
+                                    finishedSplits.containsAll(childShard.getParentShards());
+                            if (childShard.getParentShards().isEmpty() || allParentsCompleted) {
+                                unassignedSplits.add(
+                                        new KinesisShardSplit(
+                                                streamArn,
+                                                childShard.getShardId(),
+                                                StartingPosition.fromStart()));
+                            }
+                        });
+            }
+        }
     }
 
     @Override
@@ -152,7 +193,7 @@ public class KinesisStreamsSourceEnumerator
     }
 
     private List<KinesisShardSplit> initialDiscoverSplits() {
-        List<Shard> shards = streamProxy.listShards(streamArn, lastSeenShardId);
+        List<Shard> shards = streamProxy.listShards(streamArn, sourceConfig);
         return mapToSplits(shards, sourceConfig.get(STREAM_INITIAL_POSITION));
     }
 
@@ -163,10 +204,10 @@ public class KinesisStreamsSourceEnumerator
      * @return list of discovered splits
      */
     private List<KinesisShardSplit> periodicallyDiscoverSplits() {
-        List<Shard> shards = streamProxy.listShards(streamArn, lastSeenShardId);
+        //        List<Shard> shards = streamProxy.listShards(streamArn, lastSeenShardId);
         // Any shard discovered after the initial startup should be read from the start, since they
         // come from resharding
-        return mapToSplits(shards, InitialPosition.TRIM_HORIZON);
+        return mapToSplits(Collections.emptyList(), InitialPosition.TRIM_HORIZON);
     }
 
     private List<KinesisShardSplit> mapToSplits(

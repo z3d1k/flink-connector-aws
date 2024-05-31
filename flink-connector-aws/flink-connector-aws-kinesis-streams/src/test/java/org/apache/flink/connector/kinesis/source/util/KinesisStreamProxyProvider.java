@@ -18,12 +18,12 @@
 
 package org.apache.flink.connector.kinesis.source.util;
 
+import org.apache.flink.configuration.Configuration;
 import org.apache.flink.connector.kinesis.source.proxy.StreamProxy;
 import org.apache.flink.connector.kinesis.source.split.StartingPosition;
 
 import org.apache.commons.lang3.builder.EqualsBuilder;
 import org.apache.commons.lang3.builder.HashCodeBuilder;
-import org.jetbrains.annotations.Nullable;
 import software.amazon.awssdk.services.kinesis.model.GetRecordsResponse;
 import software.amazon.awssdk.services.kinesis.model.Record;
 import software.amazon.awssdk.services.kinesis.model.Shard;
@@ -65,9 +65,7 @@ public class KinesisStreamProxyProvider {
         private boolean closed = false;
 
         @Override
-        public List<Shard> listShards(String streamArn, @Nullable String lastSeenShardId) {
-            this.lastProvidedLastSeenShardId = lastSeenShardId;
-
+        public List<Shard> listShards(String streamArn, Configuration configuration) {
             if (listShardsExceptionSupplier != null) {
                 try {
                     throw listShardsExceptionSupplier.get();
@@ -78,7 +76,7 @@ public class KinesisStreamProxyProvider {
 
             List<Shard> results = new ArrayList<>();
             for (Shard shard : shards) {
-                if (shouldRespectLastSeenShardId && shard.shardId().equals(lastSeenShardId)) {
+                if (shouldRespectLastSeenShardId) {
                     results.clear();
                     continue;
                 }

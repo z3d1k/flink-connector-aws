@@ -18,6 +18,7 @@
 
 package org.apache.flink.connector.kinesis.source.proxy;
 
+import org.apache.flink.configuration.Configuration;
 import org.apache.flink.connector.kinesis.source.split.StartingPosition;
 import org.apache.flink.connector.kinesis.source.util.KinesisClientProvider.ListShardItem;
 import org.apache.flink.connector.kinesis.source.util.KinesisClientProvider.TestingKinesisClient;
@@ -77,7 +78,7 @@ class KinesisStreamProxyTest {
         KinesisStreamProxy kinesisStreamProxy =
                 new KinesisStreamProxy(testKinesisClient, HTTP_CLIENT);
 
-        assertThat(kinesisStreamProxy.listShards(streamArn, lastSeenShardId))
+        assertThat(kinesisStreamProxy.listShards(streamArn, new Configuration()))
                 .isEqualTo(expectedShards);
     }
 
@@ -119,7 +120,7 @@ class KinesisStreamProxyTest {
         KinesisStreamProxy kinesisStreamProxy =
                 new KinesisStreamProxy(testKinesisClient, HTTP_CLIENT);
 
-        assertThat(kinesisStreamProxy.listShards(streamArn, lastSeenShardId))
+        assertThat(kinesisStreamProxy.listShards(streamArn, new Configuration()))
                 .isEqualTo(expectedShards);
     }
 

@@ -48,7 +48,7 @@ class PollingKinesisShardSplitReaderTest {
         PollingKinesisShardSplitReader splitReader =
                 new PollingKinesisShardSplitReader(testStreamProxy);
 
-        RecordsWithSplitIds<Record> retrievedRecords = splitReader.fetch();
+        RecordsWithSplitIds<RecordWrapper> retrievedRecords = splitReader.fetch();
 
         assertThat(retrievedRecords.nextRecordFromSplit()).isNull();
         assertThat(retrievedRecords.nextSplit()).isNull();
@@ -68,7 +68,7 @@ class PollingKinesisShardSplitReaderTest {
                 new SplitsAddition<>(Collections.singletonList(getTestSplit(shardId))));
 
         // When fetching records
-        RecordsWithSplitIds<Record> retrievedRecords = splitReader.fetch();
+        RecordsWithSplitIds<RecordWrapper> retrievedRecords = splitReader.fetch();
 
         // Then retrieve no records
         assertThat(retrievedRecords.nextRecordFromSplit()).isNull();
@@ -100,7 +100,7 @@ class PollingKinesisShardSplitReaderTest {
         // When fetching records
         List<Record> records = new ArrayList<>();
         for (int i = 0; i < expectedRecords.size(); i++) {
-            RecordsWithSplitIds<Record> retrievedRecords = splitReader.fetch();
+            RecordsWithSplitIds<RecordWrapper> retrievedRecords = splitReader.fetch();
             records.addAll(readAllRecords(retrievedRecords));
         }
 
@@ -131,7 +131,7 @@ class PollingKinesisShardSplitReaderTest {
         // When records are fetched
         List<Record> fetchedRecords = new ArrayList<>();
         for (int i = 0; i < expectedRecords.size(); i++) {
-            RecordsWithSplitIds<Record> retrievedRecords = splitReader.fetch();
+            RecordsWithSplitIds<RecordWrapper> retrievedRecords = splitReader.fetch();
             fetchedRecords.addAll(readAllRecords(retrievedRecords));
         }
 
@@ -154,7 +154,7 @@ class PollingKinesisShardSplitReaderTest {
         testStreamProxy.setShouldCompleteNextShard(true);
 
         // When fetching records
-        RecordsWithSplitIds<Record> retrievedRecords = splitReader.fetch();
+        RecordsWithSplitIds<RecordWrapper> retrievedRecords = splitReader.fetch();
 
         // Returns completed split with no records
         assertThat(retrievedRecords.nextRecordFromSplit()).isNull();
@@ -179,9 +179,9 @@ class PollingKinesisShardSplitReaderTest {
         splitReader.handleSplitsChanges(new SplitsAddition<>(Collections.singletonList(split)));
 
         // When fetching records
-        List<Record> fetchedRecords = new ArrayList<>();
+        List<RecordWrapper> fetchedRecords = new ArrayList<>();
         testStreamProxy.setShouldCompleteNextShard(true);
-        RecordsWithSplitIds<Record> retrievedRecords = splitReader.fetch();
+        RecordsWithSplitIds<RecordWrapper> retrievedRecords = splitReader.fetch();
 
         // Then records can be read successfully, with finishedSplit returned once all records are
         // completed
@@ -192,7 +192,11 @@ class PollingKinesisShardSplitReaderTest {
         }
         assertThat(retrievedRecords.nextSplit()).isNull();
         assertThat(retrievedRecords.finishedSplits()).contains(split.splitId());
-        assertThat(fetchedRecords).containsExactlyInAnyOrderElementsOf(expectedRecords);
+        assertThat(fetchedRecords)
+                .containsExactlyInAnyOrderElementsOf(
+                        expectedRecords.stream()
+                                .map(RecordWrapper::record)
+                                .collect(Collectors.toList()));
     }
 
     @Test
@@ -214,13 +218,13 @@ class PollingKinesisShardSplitReaderTest {
         assertThat(testStreamProxy.isClosed()).isTrue();
     }
 
-    private List<Record> readAllRecords(RecordsWithSplitIds<Record> recordsWithSplitIds) {
+    private List<Record> readAllRecords(RecordsWithSplitIds<RecordWrapper> recordsWithSplitIds) {
         List<Record> outputRecords = new ArrayList<>();
-        Record record;
+        RecordWrapper record;
         do {
             record = recordsWithSplitIds.nextRecordFromSplit();
-            if (record != null) {
-                outputRecords.add(record);
+            if (record != null && record.hasRecord()) {
+                outputRecords.add(record.getRecord());
             }
         } while (record != null);
 

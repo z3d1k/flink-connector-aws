@@ -19,6 +19,7 @@
 package org.apache.flink.connector.kinesis.source.proxy;
 
 import org.apache.flink.annotation.Internal;
+import org.apache.flink.configuration.Configuration;
 import org.apache.flink.connector.kinesis.source.split.StartingPosition;
 
 import software.amazon.awssdk.http.SdkHttpClient;
@@ -30,8 +31,8 @@ import software.amazon.awssdk.services.kinesis.model.GetShardIteratorRequest;
 import software.amazon.awssdk.services.kinesis.model.ListShardsRequest;
 import software.amazon.awssdk.services.kinesis.model.ListShardsResponse;
 import software.amazon.awssdk.services.kinesis.model.Shard;
-
-import javax.annotation.Nullable;
+import software.amazon.awssdk.services.kinesis.model.ShardFilter;
+import software.amazon.awssdk.services.kinesis.model.ShardFilterType;
 
 import java.io.IOException;
 import java.time.Instant;
@@ -55,18 +56,18 @@ public class KinesisStreamProxy implements StreamProxy {
     }
 
     @Override
-    public List<Shard> listShards(String streamArn, @Nullable String lastSeenShardId) {
+    public List<Shard> listShards(String streamArn, Configuration sourceConfiguration) {
         List<Shard> shards = new ArrayList<>();
-
         ListShardsResponse listShardsResponse;
         String nextToken = null;
         do {
+            ShardFilter shardFilter =
+                    ShardFilter.builder().type(ShardFilterType.AT_TRIM_HORIZON).build();
             listShardsResponse =
                     kinesisClient.listShards(
                             ListShardsRequest.builder()
                                     .streamARN(streamArn)
-                                    .exclusiveStartShardId(
-                                            nextToken == null ? lastSeenShardId : null)
+                                    .shardFilter(shardFilter)
                                     .nextToken(nextToken)
                                     .build());
 

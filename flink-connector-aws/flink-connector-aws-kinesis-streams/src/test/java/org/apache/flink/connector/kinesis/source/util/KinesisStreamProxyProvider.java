@@ -24,6 +24,9 @@ import org.apache.flink.connector.kinesis.source.split.StartingPosition;
 
 import org.apache.commons.lang3.builder.EqualsBuilder;
 import org.apache.commons.lang3.builder.HashCodeBuilder;
+import software.amazon.awssdk.services.kinesis.model.Consumer;
+import software.amazon.awssdk.services.kinesis.model.ConsumerDescription;
+import software.amazon.awssdk.services.kinesis.model.ConsumerStatus;
 import software.amazon.awssdk.services.kinesis.model.GetRecordsResponse;
 import software.amazon.awssdk.services.kinesis.model.Record;
 import software.amazon.awssdk.services.kinesis.model.Shard;
@@ -72,6 +75,16 @@ public class KinesisStreamProxyProvider {
         private boolean shouldCompleteNextShard = false;
         private boolean closed = false;
 
+        // Describe stream consumer configuration
+        private String consumerArn;
+        private ConsumerStatus consumerStatus = ConsumerStatus.ACTIVE;
+
+        // Register stream consumer configuration
+        private Supplier<RuntimeException> registerConsumerExceptionSupplier;
+
+        // Deregister stream consumer configuration
+        private Supplier<RuntimeException> deregisterConsumerExceptionSupplier;
+
         @Override
         public StreamDescriptionSummary getStreamDescriptionSummary(String streamArn) {
             return StreamDescriptionSummary.builder()
@@ -80,6 +93,11 @@ public class KinesisStreamProxyProvider {
                     .retentionPeriodHours(retentionPeriodHours)
                     .streamCreationTimestamp(creationTimestamp)
                     .build();
+        }
+
+        public void setStreamSummary(Instant creationTimestamp, int retentionPeriodHours) {
+            this.creationTimestamp = creationTimestamp;
+            this.retentionPeriodHours = retentionPeriodHours;
         }
 
         @Override
@@ -109,6 +127,24 @@ public class KinesisStreamProxyProvider {
             return results;
         }
 
+        public void addShards(String... shardIds) {
+            for (String shardId : shardIds) {
+                shards.add(Shard.builder().shardId(shardId).build());
+            }
+        }
+
+        public void setListShardsExceptionSupplier(Supplier<Exception> exceptionSupplier) {
+            listShardsExceptionSupplier = exceptionSupplier;
+        }
+
+        public void setShouldRespectLastSeenShardId(boolean shouldRespectLastSeenShardId) {
+            this.shouldRespectLastSeenShardId = shouldRespectLastSeenShardId;
+        }
+
+        public ListShardsStartingPosition getLastProvidedListShardStartingPosition() {
+            return lastProvidedListShardStartingPosition;
+        }
+
         @Override
         public GetRecordsResponse getRecords(
                 String streamArn, String shardId, StartingPosition startingPosition) {
@@ -130,32 +166,9 @@ public class KinesisStreamProxyProvider {
                     .build();
         }
 
-        public void setStreamSummary(Instant creationTimestamp, int retentionPeriodHours) {
-            this.creationTimestamp = creationTimestamp;
-            this.retentionPeriodHours = retentionPeriodHours;
-        }
-
         public void setGetRecordsExceptionSupplier(
                 Supplier<RuntimeException> getRecordsExceptionSupplier) {
             this.getRecordsExceptionSupplier = getRecordsExceptionSupplier;
-        }
-
-        public ListShardsStartingPosition getLastProvidedListShardStartingPosition() {
-            return lastProvidedListShardStartingPosition;
-        }
-
-        public void addShards(String... shardIds) {
-            for (String shardId : shardIds) {
-                shards.add(Shard.builder().shardId(shardId).build());
-            }
-        }
-
-        public void setListShardsExceptionSupplier(Supplier<Exception> exceptionSupplier) {
-            listShardsExceptionSupplier = exceptionSupplier;
-        }
-
-        public void setShouldRespectLastSeenShardId(boolean shouldRespectLastSeenShardId) {
-            this.shouldRespectLastSeenShardId = shouldRespectLastSeenShardId;
         }
 
         public void addRecords(String streamArn, String shardId, List<Record> records) {
@@ -173,6 +186,59 @@ public class KinesisStreamProxyProvider {
 
         public void setShouldCompleteNextShard(boolean shouldCompleteNextShard) {
             this.shouldCompleteNextShard = shouldCompleteNextShard;
+        }
+
+        @Override
+        public ConsumerDescription describeStreamConsumer(String streamArn, String consumerName) {
+            return ConsumerDescription.builder()
+                    .consumerARN(consumerArn)
+                    .consumerName(consumerName)
+                    .streamARN(streamArn)
+                    .consumerCreationTimestamp(Instant.now())
+                    .consumerStatus(consumerStatus)
+                    .build();
+        }
+
+        @Override
+        public ConsumerDescription describeStreamConsumer(String streamConsumerArn) {
+            return ConsumerDescription.builder()
+                    .consumerARN(streamConsumerArn)
+                    .consumerCreationTimestamp(Instant.now())
+                    .consumerStatus(consumerStatus)
+                    .build();
+        }
+
+        public void setStreamConsumerArn(String consumerArn) {
+            this.consumerArn = consumerArn;
+        }
+
+        public void setConsumerStatus(ConsumerStatus consumerStatus) {
+            this.consumerStatus = consumerStatus;
+        }
+
+        @Override
+        public Consumer registerStreamConsumer(String streamArn, String consumerName) {
+            if (registerConsumerExceptionSupplier != null) {
+                throw registerConsumerExceptionSupplier.get();
+            }
+            return Consumer.builder().build();
+        }
+
+        public void setRegisterConsumerExceptionSupplier(
+                Supplier<RuntimeException> exceptionSupplier) {
+            this.registerConsumerExceptionSupplier = exceptionSupplier;
+        }
+
+        @Override
+        public void deregisterStreamConsumer(String consumerArn) {
+            if (deregisterConsumerExceptionSupplier != null) {
+                throw deregisterConsumerExceptionSupplier.get();
+            }
+        }
+
+        public void setDeregisterConsumerExceptionSupplier(
+                Supplier<RuntimeException> exceptionSupplier) {
+            this.deregisterConsumerExceptionSupplier = exceptionSupplier;
         }
 
         @Override

@@ -25,6 +25,10 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import software.amazon.awssdk.http.SdkHttpClient;
 import software.amazon.awssdk.services.kinesis.KinesisClient;
+import software.amazon.awssdk.services.kinesis.model.Consumer;
+import software.amazon.awssdk.services.kinesis.model.ConsumerDescription;
+import software.amazon.awssdk.services.kinesis.model.DeregisterStreamConsumerRequest;
+import software.amazon.awssdk.services.kinesis.model.DescribeStreamConsumerRequest;
 import software.amazon.awssdk.services.kinesis.model.DescribeStreamSummaryRequest;
 import software.amazon.awssdk.services.kinesis.model.DescribeStreamSummaryResponse;
 import software.amazon.awssdk.services.kinesis.model.ExpiredIteratorException;
@@ -33,6 +37,7 @@ import software.amazon.awssdk.services.kinesis.model.GetRecordsResponse;
 import software.amazon.awssdk.services.kinesis.model.GetShardIteratorRequest;
 import software.amazon.awssdk.services.kinesis.model.ListShardsRequest;
 import software.amazon.awssdk.services.kinesis.model.ListShardsResponse;
+import software.amazon.awssdk.services.kinesis.model.RegisterStreamConsumerRequest;
 import software.amazon.awssdk.services.kinesis.model.Shard;
 import software.amazon.awssdk.services.kinesis.model.StreamDescriptionSummary;
 
@@ -113,6 +118,44 @@ public class KinesisStreamProxy implements StreamProxy {
             }
             return getRecordsResponse;
         }
+    }
+
+    @Override
+    public ConsumerDescription describeStreamConsumer(String streamArn, String consumerName) {
+        DescribeStreamConsumerRequest request =
+                DescribeStreamConsumerRequest.builder()
+                        .streamARN(streamArn)
+                        .consumerName(consumerName)
+                        .build();
+        return describeStreamConsumer(request);
+    }
+
+    @Override
+    public ConsumerDescription describeStreamConsumer(String streamConsumerArn) {
+        DescribeStreamConsumerRequest request =
+                DescribeStreamConsumerRequest.builder().consumerARN(streamConsumerArn).build();
+        return describeStreamConsumer(request);
+    }
+
+    private ConsumerDescription describeStreamConsumer(DescribeStreamConsumerRequest request) {
+        return kinesisClient.describeStreamConsumer(request).consumerDescription();
+    }
+
+    @Override
+    public Consumer registerStreamConsumer(String streamArn, String consumerName) {
+        RegisterStreamConsumerRequest request =
+                RegisterStreamConsumerRequest.builder()
+                        .streamARN(streamArn)
+                        .consumerName(consumerName)
+                        .build();
+        return kinesisClient.registerStreamConsumer(request).consumer();
+    }
+
+    @Override
+    public void deregisterStreamConsumer(String consumerArn) {
+        DeregisterStreamConsumerRequest request =
+                DeregisterStreamConsumerRequest.builder().consumerARN(consumerArn).build();
+        kinesisClient.deregisterStreamConsumer(request);
     }
 
     private String getShardIterator(

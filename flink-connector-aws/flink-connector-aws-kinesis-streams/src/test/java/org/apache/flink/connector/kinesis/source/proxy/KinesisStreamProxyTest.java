@@ -28,6 +28,13 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
 import software.amazon.awssdk.http.SdkHttpClient;
 import software.amazon.awssdk.http.apache.ApacheHttpClient;
+import software.amazon.awssdk.services.kinesis.model.Consumer;
+import software.amazon.awssdk.services.kinesis.model.ConsumerDescription;
+import software.amazon.awssdk.services.kinesis.model.ConsumerStatus;
+import software.amazon.awssdk.services.kinesis.model.DeregisterStreamConsumerRequest;
+import software.amazon.awssdk.services.kinesis.model.DeregisterStreamConsumerResponse;
+import software.amazon.awssdk.services.kinesis.model.DescribeStreamConsumerRequest;
+import software.amazon.awssdk.services.kinesis.model.DescribeStreamConsumerResponse;
 import software.amazon.awssdk.services.kinesis.model.DescribeStreamSummaryRequest;
 import software.amazon.awssdk.services.kinesis.model.DescribeStreamSummaryResponse;
 import software.amazon.awssdk.services.kinesis.model.ExpiredIteratorException;
@@ -37,6 +44,8 @@ import software.amazon.awssdk.services.kinesis.model.GetShardIteratorRequest;
 import software.amazon.awssdk.services.kinesis.model.KinesisRequest;
 import software.amazon.awssdk.services.kinesis.model.ListShardsRequest;
 import software.amazon.awssdk.services.kinesis.model.Record;
+import software.amazon.awssdk.services.kinesis.model.RegisterStreamConsumerRequest;
+import software.amazon.awssdk.services.kinesis.model.RegisterStreamConsumerResponse;
 import software.amazon.awssdk.services.kinesis.model.Shard;
 import software.amazon.awssdk.services.kinesis.model.ShardFilter;
 import software.amazon.awssdk.services.kinesis.model.ShardIteratorType;
@@ -47,7 +56,6 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.function.Consumer;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -353,10 +361,11 @@ class KinesisStreamProxyTest {
                     }
                     // Then getRecords called with second shard iterator
                     validateEqual(
-                            GetRecordsRequest.builder()
-                                    .streamARN(STREAM_ARN)
-                                    .shardIterator(secondShardIterator)
-                                    .build());
+                                    GetRecordsRequest.builder()
+                                            .streamARN(STREAM_ARN)
+                                            .shardIterator(secondShardIterator)
+                                            .build())
+                            .accept(request);
                 });
 
         // Then getRecords called with second shard iterator
@@ -400,12 +409,100 @@ class KinesisStreamProxyTest {
     }
 
     @Test
+    void testDescribeStreamConsumer() {
+        final String consumerName = "stream-consumer";
+
+        DescribeStreamConsumerResponse expectedResponse =
+                DescribeStreamConsumerResponse.builder()
+                        .consumerDescription(
+                                ConsumerDescription.builder()
+                                        .streamARN(STREAM_ARN)
+                                        .consumerARN(STREAM_ARN + "/consumer/" + consumerName)
+                                        .consumerName(consumerName)
+                                        .consumerCreationTimestamp(Instant.now())
+                                        .consumerStatus(ConsumerStatus.ACTIVE)
+                                        .build())
+                        .build();
+        testKinesisClient.setDescribeStreamConsumerResponse(expectedResponse);
+        testKinesisClient.setDescribeStreamConsumerValidation(
+                validateEqual(
+                        DescribeStreamConsumerRequest.builder()
+                                .streamARN(STREAM_ARN)
+                                .consumerName(consumerName)
+                                .build()));
+
+        assertThat(kinesisStreamProxy.describeStreamConsumer(STREAM_ARN, consumerName))
+                .isEqualTo(expectedResponse.consumerDescription());
+    }
+
+    @Test
+    void testDescribeStreamConsumerUsingConsumerArn() {
+        final String consumerArn = STREAM_ARN + "/consumer/stream-consumer";
+
+        DescribeStreamConsumerResponse expectedResponse =
+                DescribeStreamConsumerResponse.builder()
+                        .consumerDescription(
+                                ConsumerDescription.builder()
+                                        .consumerARN(consumerArn)
+                                        .consumerCreationTimestamp(Instant.now())
+                                        .consumerStatus(ConsumerStatus.ACTIVE)
+                                        .build())
+                        .build();
+        testKinesisClient.setDescribeStreamConsumerResponse(expectedResponse);
+        testKinesisClient.setDescribeStreamConsumerValidation(
+                validateEqual(
+                        DescribeStreamConsumerRequest.builder().consumerARN(consumerArn).build()));
+
+        assertThat(kinesisStreamProxy.describeStreamConsumer(consumerArn))
+                .isEqualTo(expectedResponse.consumerDescription());
+    }
+
+    @Test
+    void testRegisterStreamConsumer() {
+        final String consumerName = "stream-consumer";
+
+        RegisterStreamConsumerResponse clientResponse =
+                RegisterStreamConsumerResponse.builder()
+                        .consumer(
+                                Consumer.builder()
+                                        .consumerName(consumerName)
+                                        .consumerARN(STREAM_ARN + "/consumer/" + consumerName)
+                                        .consumerStatus(ConsumerStatus.CREATING)
+                                        .consumerCreationTimestamp(Instant.now())
+                                        .build())
+                        .build();
+        testKinesisClient.setRegisterStreamConsumerResponse(clientResponse);
+        testKinesisClient.setRegisterStreamConsumerValidation(
+                validateEqual(
+                        RegisterStreamConsumerRequest.builder()
+                                .streamARN(STREAM_ARN)
+                                .consumerName(consumerName)
+                                .build()));
+
+        assertThatNoException()
+                .isThrownBy(
+                        () -> kinesisStreamProxy.registerStreamConsumer(STREAM_ARN, consumerName));
+    }
+
+    @Test
+    void testDeregisterStreamConsumer() {
+        final String consumerArn = STREAM_ARN + "/consumer/stream-consumer";
+
+        DeregisterStreamConsumerResponse clientResponse =
+                DeregisterStreamConsumerResponse.builder().build();
+        testKinesisClient.setDeregisterStreamConsumerResponse(clientResponse);
+        testKinesisClient.setDeregisterStreamConsumerValidation(
+                validateEqual(
+                        DeregisterStreamConsumerRequest.builder()
+                                .consumerARN(consumerArn)
+                                .build()));
+
+        assertThatNoException()
+                .isThrownBy(() -> kinesisStreamProxy.deregisterStreamConsumer(consumerArn));
+    }
+
+    @Test
     void testCloseClosesKinesisClient() {
-        TestingKinesisClient testKinesisClient = new TestingKinesisClient();
-
-        KinesisStreamProxy kinesisStreamProxy =
-                new KinesisStreamProxy(testKinesisClient, HTTP_CLIENT);
-
         assertThatNoException().isThrownBy(kinesisStreamProxy::close);
         assertThat(testKinesisClient.isClosed()).isTrue();
     }
@@ -418,7 +515,7 @@ class KinesisStreamProxyTest {
         return shards;
     }
 
-    private Consumer<ListShardsRequest> getListShardRequestValidation(
+    private java.util.function.Consumer<ListShardsRequest> getListShardRequestValidation(
             final String streamArn, final ShardFilter shardFilter, final String nextToken) {
         return req -> {
             ListShardsRequest expectedReq =
@@ -431,7 +528,8 @@ class KinesisStreamProxyTest {
         };
     }
 
-    private <R extends KinesisRequest> Consumer<R> validateEqual(final R request) {
+    private <R extends KinesisRequest> java.util.function.Consumer<R> validateEqual(
+            final R request) {
         return req -> assertThat(req).isEqualTo(request);
     }
 }

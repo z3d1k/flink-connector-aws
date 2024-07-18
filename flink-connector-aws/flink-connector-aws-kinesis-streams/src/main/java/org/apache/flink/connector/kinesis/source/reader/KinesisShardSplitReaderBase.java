@@ -23,14 +23,12 @@ import org.apache.flink.connector.base.source.reader.RecordsWithSplitIds;
 import org.apache.flink.connector.base.source.reader.splitreader.SplitReader;
 import org.apache.flink.connector.base.source.reader.splitreader.SplitsChange;
 import org.apache.flink.connector.kinesis.source.metrics.KinesisShardMetrics;
-import org.apache.flink.connector.kinesis.source.proxy.StreamProxy;
 import org.apache.flink.connector.kinesis.source.split.KinesisShardSplit;
 import org.apache.flink.connector.kinesis.source.split.KinesisShardSplitState;
 import org.apache.flink.connector.kinesis.source.split.StartingPosition;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import software.amazon.awssdk.services.kinesis.model.GetRecordsResponse;
 import software.amazon.awssdk.services.kinesis.model.Record;
 import software.amazon.awssdk.services.kinesis.model.ResourceNotFoundException;
 
@@ -43,37 +41,32 @@ import java.util.Collections;
 import java.util.Deque;
 import java.util.HashSet;
 import java.util.Iterator;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-import static java.util.Collections.singleton;
-
-/**
- * An implementation of the SplitReader that periodically polls the Kinesis stream to retrieve
- * records.
- */
+/** Base implementation of the SplitReader for Kinesis stream, providing common logic. */
 @Internal
-public class PollingKinesisShardSplitReader implements SplitReader<Record, KinesisShardSplit> {
-    private static final Logger LOG = LoggerFactory.getLogger(PollingKinesisShardSplitReader.class);
+public abstract class KinesisShardSplitReaderBase
+        implements SplitReader<Record, KinesisShardSplit> {
+    private static final Logger LOG = LoggerFactory.getLogger(KinesisShardSplitReaderBase.class);
 
-    private static final RecordsWithSplitIds<Record> INCOMPLETE_SHARD_EMPTY_RECORDS =
+    protected static final RecordsWithSplitIds<Record> INCOMPLETE_SHARD_EMPTY_RECORDS =
             new KinesisRecordsWithSplitIds(Collections.emptyIterator(), null, false);
 
-    private final StreamProxy kinesis;
     private final Deque<KinesisShardSplitState> assignedSplits = new ArrayDeque<>();
     private final Set<String> pausedSplitIds = new HashSet<>();
 
     private final Map<String, KinesisShardMetrics> shardMetricGroupMap;
 
-    public PollingKinesisShardSplitReader(
-            StreamProxy kinesisProxy, Map<String, KinesisShardMetrics> shardMetricGroupMap) {
-        this.kinesis = kinesisProxy;
+    public KinesisShardSplitReaderBase(Map<String, KinesisShardMetrics> shardMetricGroupMap) {
         this.shardMetricGroupMap = shardMetricGroupMap;
     }
 
     @Override
     public RecordsWithSplitIds<Record> fetch() throws IOException {
         KinesisShardSplitState splitState = assignedSplits.poll();
+
         if (splitState == null) {
             return INCOMPLETE_SHARD_EMPTY_RECORDS;
         }
@@ -84,13 +77,10 @@ public class PollingKinesisShardSplitReader implements SplitReader<Record, Kines
             return INCOMPLETE_SHARD_EMPTY_RECORDS;
         }
 
-        GetRecordsResponse getRecordsResponse;
+        RecordBatch recordBatch;
+
         try {
-            getRecordsResponse =
-                    kinesis.getRecords(
-                            splitState.getStreamArn(),
-                            splitState.getShardId(),
-                            splitState.getNextStartingPosition());
+            recordBatch = fetchRecords(splitState);
         } catch (ResourceNotFoundException e) {
             LOG.warn(
                     "Failed to fetch records from shard {}: shard no longer exists. Marking split as complete",
@@ -98,37 +88,38 @@ public class PollingKinesisShardSplitReader implements SplitReader<Record, Kines
             return new KinesisRecordsWithSplitIds(
                     Collections.emptyIterator(), splitState.getSplitId(), true);
         }
-        boolean isComplete = getRecordsResponse.nextShardIterator() == null;
+
+        if (!recordBatch.isCompleted()) {
+            assignedSplits.add(splitState);
+        }
 
         shardMetricGroupMap
                 .get(splitState.getShardId())
-                .setMillisBehindLatest(getRecordsResponse.millisBehindLatest());
+                .setMillisBehindLatest(recordBatch.getMillisBehindLatest());
 
-        if (hasNoRecords(getRecordsResponse)) {
-            if (isComplete) {
+        if (recordBatch.getRecords().isEmpty()) {
+            if (recordBatch.isCompleted()) {
                 return new KinesisRecordsWithSplitIds(
                         Collections.emptyIterator(), splitState.getSplitId(), true);
             } else {
-                assignedSplits.add(splitState);
                 return INCOMPLETE_SHARD_EMPTY_RECORDS;
             }
         }
 
         splitState.setNextStartingPosition(
                 StartingPosition.continueFromSequenceNumber(
-                        getRecordsResponse
-                                .records()
-                                .get(getRecordsResponse.records().size() - 1)
+                        recordBatch
+                                .getRecords()
+                                .get(recordBatch.getRecords().size() - 1)
                                 .sequenceNumber()));
 
-        assignedSplits.add(splitState);
         return new KinesisRecordsWithSplitIds(
-                getRecordsResponse.records().iterator(), splitState.getSplitId(), isComplete);
+                recordBatch.getRecords().iterator(),
+                splitState.getSplitId(),
+                recordBatch.isCompleted());
     }
 
-    private boolean hasNoRecords(GetRecordsResponse getRecordsResponse) {
-        return !getRecordsResponse.hasRecords() || getRecordsResponse.records().isEmpty();
-    }
+    protected abstract RecordBatch fetchRecords(KinesisShardSplitState splitState);
 
     @Override
     public void handleSplitsChanges(SplitsChange<KinesisShardSplit> splitsChanges) {
@@ -150,11 +141,36 @@ public class PollingKinesisShardSplitReader implements SplitReader<Record, Kines
         // Do nothing because we don't have any sleep mechanism
     }
 
-    @Override
-    public void close() throws Exception {
-        kinesis.close();
+    /** Record list with metadata received from reader implementations. */
+    protected static class RecordBatch {
+        private final List<Record> records;
+        private final Long millisBehindLatest;
+        private final boolean completed;
+
+        public RecordBatch(List<Record> records, Long millisBehindLatest, boolean completed) {
+            this.records = records;
+            this.millisBehindLatest = millisBehindLatest;
+            this.completed = completed;
+        }
+
+        public List<Record> getRecords() {
+            return records;
+        }
+
+        public Long getMillisBehindLatest() {
+            return millisBehindLatest;
+        }
+
+        public boolean isCompleted() {
+            return completed;
+        }
     }
 
+    /**
+     * Implementation of {@link RecordsWithSplitIds} for sending Kinesis records from fetchers to
+     * source reader.
+     */
+    @Internal
     private static class KinesisRecordsWithSplitIds implements RecordsWithSplitIds<Record> {
 
         private final Iterator<Record> recordsIterator;
@@ -188,7 +204,7 @@ public class PollingKinesisShardSplitReader implements SplitReader<Record, Kines
             if (recordsIterator.hasNext()) {
                 return Collections.emptySet();
             }
-            return isComplete ? singleton(splitId) : Collections.emptySet();
+            return isComplete ? Collections.singleton(splitId) : Collections.emptySet();
         }
     }
 }

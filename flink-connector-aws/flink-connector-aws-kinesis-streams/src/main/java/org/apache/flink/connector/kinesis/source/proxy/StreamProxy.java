@@ -21,6 +21,8 @@ package org.apache.flink.connector.kinesis.source.proxy;
 import org.apache.flink.annotation.Internal;
 import org.apache.flink.connector.kinesis.source.split.StartingPosition;
 
+import software.amazon.awssdk.services.kinesis.model.Consumer;
+import software.amazon.awssdk.services.kinesis.model.ConsumerDescription;
 import software.amazon.awssdk.services.kinesis.model.GetRecordsResponse;
 import software.amazon.awssdk.services.kinesis.model.Shard;
 import software.amazon.awssdk.services.kinesis.model.StreamDescriptionSummary;
@@ -60,4 +62,37 @@ public interface StreamProxy extends Closeable {
      */
     GetRecordsResponse getRecords(
             String streamArn, String shardId, StartingPosition startingPosition);
+
+    /**
+     * Retrieves stream consumer metadata.
+     *
+     * @param streamArn the ARN of the stream
+     * @param streamConsumerName EFO consumer name
+     * @return Stream consumer metadata.
+     */
+    ConsumerDescription describeStreamConsumer(String streamArn, String streamConsumerName);
+
+    /**
+     * Retrieves stream consumer metadata.
+     *
+     * @param streamConsumerArn the ARN of the stream consumer
+     * @return Stream consumer metadata.
+     */
+    ConsumerDescription describeStreamConsumer(String streamConsumerArn);
+
+    /**
+     * Registers new consumer for the stream.
+     *
+     * @param streamArn the ARN of the stream
+     * @param streamConsumerName EFO consumer name
+     * @return Stream consumer metadata.
+     */
+    Consumer registerStreamConsumer(String streamArn, String streamConsumerName);
+
+    /**
+     * De-registers stream consumer.
+     *
+     * @param streamConsumerArn the ARN of the stream consumer
+     */
+    void deregisterStreamConsumer(String streamConsumerArn);
 }

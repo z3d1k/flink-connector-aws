@@ -22,29 +22,20 @@ import software.amazon.awssdk.awscore.exception.AwsServiceException;
 import software.amazon.awssdk.core.exception.SdkClientException;
 import software.amazon.awssdk.services.kinesis.KinesisClient;
 import software.amazon.awssdk.services.kinesis.KinesisServiceClientConfiguration;
-import software.amazon.awssdk.services.kinesis.model.AccessDeniedException;
+import software.amazon.awssdk.services.kinesis.model.DeregisterStreamConsumerRequest;
+import software.amazon.awssdk.services.kinesis.model.DeregisterStreamConsumerResponse;
+import software.amazon.awssdk.services.kinesis.model.DescribeStreamConsumerRequest;
+import software.amazon.awssdk.services.kinesis.model.DescribeStreamConsumerResponse;
 import software.amazon.awssdk.services.kinesis.model.DescribeStreamSummaryRequest;
 import software.amazon.awssdk.services.kinesis.model.DescribeStreamSummaryResponse;
-import software.amazon.awssdk.services.kinesis.model.ExpiredIteratorException;
-import software.amazon.awssdk.services.kinesis.model.ExpiredNextTokenException;
 import software.amazon.awssdk.services.kinesis.model.GetRecordsRequest;
 import software.amazon.awssdk.services.kinesis.model.GetRecordsResponse;
 import software.amazon.awssdk.services.kinesis.model.GetShardIteratorRequest;
 import software.amazon.awssdk.services.kinesis.model.GetShardIteratorResponse;
-import software.amazon.awssdk.services.kinesis.model.InvalidArgumentException;
-import software.amazon.awssdk.services.kinesis.model.KinesisException;
-import software.amazon.awssdk.services.kinesis.model.KmsAccessDeniedException;
-import software.amazon.awssdk.services.kinesis.model.KmsDisabledException;
-import software.amazon.awssdk.services.kinesis.model.KmsInvalidStateException;
-import software.amazon.awssdk.services.kinesis.model.KmsNotFoundException;
-import software.amazon.awssdk.services.kinesis.model.KmsOptInRequiredException;
-import software.amazon.awssdk.services.kinesis.model.KmsThrottlingException;
-import software.amazon.awssdk.services.kinesis.model.LimitExceededException;
 import software.amazon.awssdk.services.kinesis.model.ListShardsRequest;
 import software.amazon.awssdk.services.kinesis.model.ListShardsResponse;
-import software.amazon.awssdk.services.kinesis.model.ProvisionedThroughputExceededException;
-import software.amazon.awssdk.services.kinesis.model.ResourceInUseException;
-import software.amazon.awssdk.services.kinesis.model.ResourceNotFoundException;
+import software.amazon.awssdk.services.kinesis.model.RegisterStreamConsumerRequest;
+import software.amazon.awssdk.services.kinesis.model.RegisterStreamConsumerResponse;
 import software.amazon.awssdk.services.kinesis.model.Shard;
 
 import java.util.ArrayDeque;
@@ -69,6 +60,21 @@ public class KinesisClientProvider {
         private DescribeStreamSummaryResponse describeStreamSummaryResponse;
         private Consumer<DescribeStreamSummaryRequest> describeStreamSummaryRequestValidation;
         private boolean closed = false;
+
+        // Describe stream consumer configuration
+        private DescribeStreamConsumerResponse describeStreamConsumerResponse;
+        private Consumer<DescribeStreamConsumerRequest> describeStreamConsumerValidation =
+                request -> {};
+
+        // Register stream consumer configuration
+        private RegisterStreamConsumerResponse registerStreamConsumerResponse;
+        private Consumer<RegisterStreamConsumerRequest> registerStreamConsumerValidation =
+                request -> {};
+
+        // Deregister stream consumer configuration
+        private DeregisterStreamConsumerResponse deregisterStreamConsumerResponse;
+        private Consumer<DeregisterStreamConsumerRequest> deregisterStreamConsumerValidation =
+                request -> {};
 
         @Override
         public String serviceName() {
@@ -95,9 +101,7 @@ public class KinesisClientProvider {
         @Override
         public GetShardIteratorResponse getShardIterator(
                 GetShardIteratorRequest getShardIteratorRequest)
-                throws ResourceNotFoundException, InvalidArgumentException,
-                        ProvisionedThroughputExceededException, AccessDeniedException,
-                        AwsServiceException, SdkClientException, KinesisException {
+                throws AwsServiceException, SdkClientException {
             getShardIteratorValidation.accept(getShardIteratorRequest);
             return GetShardIteratorResponse.builder().shardIterator(shardIterators.poll()).build();
         }
@@ -108,9 +112,7 @@ public class KinesisClientProvider {
 
         @Override
         public ListShardsResponse listShards(ListShardsRequest listShardsRequest)
-                throws ResourceNotFoundException, InvalidArgumentException, LimitExceededException,
-                        ExpiredNextTokenException, ResourceInUseException, AccessDeniedException,
-                        AwsServiceException, SdkClientException, KinesisException {
+                throws AwsServiceException, SdkClientException {
             ListShardItem item = listShardQueue.pop();
 
             item.validation.accept(listShardsRequest);
@@ -130,12 +132,7 @@ public class KinesisClientProvider {
 
         @Override
         public GetRecordsResponse getRecords(GetRecordsRequest getRecordsRequest)
-                throws ResourceNotFoundException, InvalidArgumentException,
-                        ProvisionedThroughputExceededException, ExpiredIteratorException,
-                        KmsDisabledException, KmsInvalidStateException, KmsAccessDeniedException,
-                        KmsNotFoundException, KmsOptInRequiredException, KmsThrottlingException,
-                        AccessDeniedException, AwsServiceException, SdkClientException,
-                        KinesisException {
+                throws AwsServiceException, SdkClientException {
             getRecordsValidation.accept(getRecordsRequest);
             return getRecordsResponse;
         }
@@ -153,9 +150,7 @@ public class KinesisClientProvider {
         @Override
         public DescribeStreamSummaryResponse describeStreamSummary(
                 DescribeStreamSummaryRequest describeStreamSummaryRequest)
-                throws ResourceNotFoundException, LimitExceededException, InvalidArgumentException,
-                        AccessDeniedException, AwsServiceException, SdkClientException,
-                        KinesisException {
+                throws AwsServiceException, SdkClientException {
             describeStreamSummaryRequestValidation.accept(describeStreamSummaryRequest);
             return describeStreamSummaryResponse;
         }
@@ -164,6 +159,57 @@ public class KinesisClientProvider {
         public KinesisServiceClientConfiguration serviceClientConfiguration() {
             // This is not used
             return null;
+        }
+
+        @Override
+        public DescribeStreamConsumerResponse describeStreamConsumer(
+                DescribeStreamConsumerRequest describeStreamConsumerRequest)
+                throws AwsServiceException, SdkClientException {
+            describeStreamConsumerValidation.accept(describeStreamConsumerRequest);
+            return describeStreamConsumerResponse;
+        }
+
+        public void setDescribeStreamConsumerResponse(DescribeStreamConsumerResponse response) {
+            this.describeStreamConsumerResponse = response;
+        }
+
+        public void setDescribeStreamConsumerValidation(
+                Consumer<DescribeStreamConsumerRequest> describeStreamConsumerValidation) {
+            this.describeStreamConsumerValidation = describeStreamConsumerValidation;
+        }
+
+        @Override
+        public DeregisterStreamConsumerResponse deregisterStreamConsumer(
+                DeregisterStreamConsumerRequest deregisterStreamConsumerRequest)
+                throws AwsServiceException, SdkClientException {
+            deregisterStreamConsumerValidation.accept(deregisterStreamConsumerRequest);
+            return deregisterStreamConsumerResponse;
+        }
+
+        public void setDeregisterStreamConsumerResponse(DeregisterStreamConsumerResponse response) {
+            this.deregisterStreamConsumerResponse = response;
+        }
+
+        public void setDeregisterStreamConsumerValidation(
+                Consumer<DeregisterStreamConsumerRequest> deregisterStreamConsumerValidation) {
+            this.deregisterStreamConsumerValidation = deregisterStreamConsumerValidation;
+        }
+
+        @Override
+        public RegisterStreamConsumerResponse registerStreamConsumer(
+                RegisterStreamConsumerRequest registerStreamConsumerRequest)
+                throws AwsServiceException, SdkClientException {
+            registerStreamConsumerValidation.accept(registerStreamConsumerRequest);
+            return registerStreamConsumerResponse;
+        }
+
+        public void setRegisterStreamConsumerResponse(RegisterStreamConsumerResponse response) {
+            this.registerStreamConsumerResponse = response;
+        }
+
+        public void setRegisterStreamConsumerValidation(
+                Consumer<RegisterStreamConsumerRequest> registerStreamConsumerValidation) {
+            this.registerStreamConsumerValidation = registerStreamConsumerValidation;
         }
     }
 

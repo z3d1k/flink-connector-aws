@@ -51,7 +51,7 @@ public abstract class KinesisShardSplitReaderBase
         implements SplitReader<Record, KinesisShardSplit> {
     private static final Logger LOG = LoggerFactory.getLogger(KinesisShardSplitReaderBase.class);
 
-    protected static final RecordsWithSplitIds<Record> INCOMPLETE_SHARD_EMPTY_RECORDS =
+    private static final RecordsWithSplitIds<Record> INCOMPLETE_SHARD_EMPTY_RECORDS =
             new KinesisRecordsWithSplitIds(Collections.emptyIterator(), null, false);
 
     private final Deque<KinesisShardSplitState> assignedSplits = new ArrayDeque<>();
@@ -89,13 +89,18 @@ public abstract class KinesisShardSplitReaderBase
                     Collections.emptyIterator(), splitState.getSplitId(), true);
         }
 
-        if (!recordBatch.isCompleted()) {
+        if (recordBatch == null) {
             assignedSplits.add(splitState);
+            return INCOMPLETE_SHARD_EMPTY_RECORDS;
         }
 
         shardMetricGroupMap
                 .get(splitState.getShardId())
                 .setMillisBehindLatest(recordBatch.getMillisBehindLatest());
+
+        if (!recordBatch.isCompleted()) {
+            assignedSplits.add(splitState);
+        }
 
         if (recordBatch.getRecords().isEmpty()) {
             if (recordBatch.isCompleted()) {
@@ -121,9 +126,14 @@ public abstract class KinesisShardSplitReaderBase
 
     protected abstract RecordBatch fetchRecords(KinesisShardSplitState splitState);
 
+    protected void addSplitInternal(KinesisShardSplit split) {
+        // empty default implementation
+    }
+
     @Override
     public void handleSplitsChanges(SplitsChange<KinesisShardSplit> splitsChanges) {
         for (KinesisShardSplit split : splitsChanges.splits()) {
+            addSplitInternal(split);
             assignedSplits.add(new KinesisShardSplitState(split));
         }
     }

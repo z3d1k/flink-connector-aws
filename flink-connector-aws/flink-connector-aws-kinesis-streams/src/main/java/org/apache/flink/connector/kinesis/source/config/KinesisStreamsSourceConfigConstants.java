@@ -22,6 +22,8 @@ import org.apache.flink.annotation.Experimental;
 import org.apache.flink.configuration.ConfigOption;
 import org.apache.flink.configuration.ConfigOptions;
 
+import java.time.Duration;
+
 /** Constants to be used with the KinesisStreamsSource. */
 @Experimental
 public class KinesisStreamsSourceConfigConstants {
@@ -30,6 +32,16 @@ public class KinesisStreamsSourceConfigConstants {
         LATEST,
         TRIM_HORIZON,
         AT_TIMESTAMP
+    }
+
+    /** Defines mechanism used to consume records from Kinesis stream. */
+    public enum ConsumerType {
+        POLLING,
+        EFO
+    }
+
+    public enum EfoConsumerRegistrationType {
+        NONE
     }
 
     public static final ConfigOption<InitialPosition> STREAM_INITIAL_POSITION =
@@ -57,4 +69,49 @@ public class KinesisStreamsSourceConfigConstants {
                     .longType()
                     .defaultValue(10000L)
                     .withDescription("The interval between each attempt to discover new shards.");
+
+    public static final ConfigOption<ConsumerType> CONSUMER_TYPE =
+            ConfigOptions.key("type")
+                    .enumType(ConsumerType.class)
+                    .defaultValue(ConsumerType.POLLING);
+
+    public static final ConfigOption<EfoConsumerRegistrationType> EFO_CONSUMER_REGISTRATION_TYPE =
+            ConfigOptions.key("efo.consumer.registration.type")
+                    .enumType(EfoConsumerRegistrationType.class)
+                    .defaultValue(EfoConsumerRegistrationType.NONE);
+
+    public static final ConfigOption<String> EFO_CONSUMER_NAME =
+            ConfigOptions.key("efo.consumer.name")
+                    .stringType()
+                    .noDefaultValue();
+    public static final ConfigOption<String> EFO_CONSUMER_ARN =
+            ConfigOptions.key("efo.consumer.arn")
+                    .stringType()
+                    .noDefaultValue();
+
+    public static final ConfigOption<Duration> EFO_CONSUMER_REGISTRATION_INITIAL_BACKOFF =
+            ConfigOptions.key("efo.consumer.registration.initial-backoff")
+                    .durationType()
+                    .defaultValue(Duration.ofSeconds(5));
+    public static final ConfigOption<Duration> EFO_CONSUMER_REGISTRATION_MAX_BACKOFF =
+            ConfigOptions.key("efo.consumer.registration.max-backoff")
+                    .durationType()
+                    .defaultValue(Duration.ofSeconds(30));
+    public static final ConfigOption<Duration> EFO_CONSUMER_REGISTRATION_TIMEOUT =
+            ConfigOptions.key("efo.consumer.registration.timeout")
+                    .durationType()
+                    .defaultValue(Duration.ofMinutes(3));
+
+    public static final ConfigOption<Duration> EFO_CONSUMER_DEREGISTRATION_INITIAL_BACKOFF =
+            ConfigOptions.key("efo.consumer.deregistration.initial-backoff")
+                    .durationType()
+                    .defaultValue(Duration.ofSeconds(5));
+    public static final ConfigOption<Duration> EFO_CONSUMER_DEREGISTRATION_MAX_BACKOFF =
+            ConfigOptions.key("efo.consumer.deregistration.max-backoff")
+                    .durationType()
+                    .defaultValue(Duration.ofSeconds(30));
+    public static final ConfigOption<Duration> EFO_CONSUMER_DEREGISTRATION_TIMEOUT =
+            ConfigOptions.key("efo.consumer.deregistration.timeout")
+                    .durationType()
+                    .defaultValue(Duration.ofMinutes(3));
 }

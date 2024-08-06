@@ -32,16 +32,22 @@ import org.apache.flink.connector.aws.util.AWSClientUtil;
 import org.apache.flink.connector.aws.util.AWSGeneralUtil;
 import org.apache.flink.connector.base.source.reader.RecordsWithSplitIds;
 import org.apache.flink.connector.base.source.reader.fetcher.SingleThreadFetcherManager;
+import org.apache.flink.connector.base.source.reader.splitreader.SplitReader;
 import org.apache.flink.connector.base.source.reader.synchronization.FutureCompletingBlockingQueue;
 import org.apache.flink.connector.kinesis.sink.KinesisStreamsConfigConstants;
+import org.apache.flink.connector.kinesis.source.config.KinesisStreamsSourceConfigConstants;
 import org.apache.flink.connector.kinesis.source.enumerator.KinesisShardAssigner;
 import org.apache.flink.connector.kinesis.source.enumerator.KinesisStreamsSourceEnumerator;
 import org.apache.flink.connector.kinesis.source.enumerator.KinesisStreamsSourceEnumeratorState;
 import org.apache.flink.connector.kinesis.source.enumerator.KinesisStreamsSourceEnumeratorStateSerializer;
 import org.apache.flink.connector.kinesis.source.metrics.KinesisShardMetrics;
+import org.apache.flink.connector.kinesis.source.proxy.KinesisAsyncStreamProxy;
 import org.apache.flink.connector.kinesis.source.proxy.KinesisStreamProxy;
+import org.apache.flink.connector.kinesis.source.reader.KinesisShardSplitReaderBase;
+import org.apache.flink.connector.kinesis.source.reader.KinesisSourceFetcherManager;
 import org.apache.flink.connector.kinesis.source.reader.KinesisStreamsRecordEmitter;
 import org.apache.flink.connector.kinesis.source.reader.KinesisStreamsSourceReader;
+import org.apache.flink.connector.kinesis.source.reader.fanout.FanOutKinesisShardSplitReader;
 import org.apache.flink.connector.kinesis.source.reader.polling.PollingKinesisShardSplitReader;
 import org.apache.flink.connector.kinesis.source.serialization.KinesisDeserializationSchema;
 import org.apache.flink.connector.kinesis.source.split.KinesisShardSplit;
@@ -53,6 +59,9 @@ import org.apache.flink.util.UserCodeClassLoader;
 
 import software.amazon.awssdk.http.SdkHttpClient;
 import software.amazon.awssdk.http.apache.ApacheHttpClient;
+import software.amazon.awssdk.http.async.SdkAsyncHttpClient;
+import software.amazon.awssdk.http.nio.netty.NettyNioAsyncHttpClient;
+import software.amazon.awssdk.services.kinesis.KinesisAsyncClient;
 import software.amazon.awssdk.services.kinesis.KinesisClient;
 import software.amazon.awssdk.services.kinesis.model.Record;
 import software.amazon.awssdk.utils.AttributeMap;
@@ -134,19 +143,15 @@ public class KinesisStreamsSource<T>
 
         Map<String, KinesisShardMetrics> shardMetricGroupMap = new ConcurrentHashMap<>();
 
-        // We create a new stream proxy for each split reader since they have their own independent
-        // lifecycle.
-        Supplier<PollingKinesisShardSplitReader> splitReaderSupplier =
-                () ->
-                        new PollingKinesisShardSplitReader(
-                                createKinesisStreamProxy(sourceConfig), shardMetricGroupMap);
         KinesisStreamsRecordEmitter<T> recordEmitter =
                 new KinesisStreamsRecordEmitter<>(deserializationSchema);
 
         return new KinesisStreamsSourceReader<>(
                 elementsQueue,
-                new SingleThreadFetcherManager<>(
-                        elementsQueue, splitReaderSupplier::get, new Configuration()),
+                new KinesisSourceFetcherManager(
+                        elementsQueue,
+                        getKinesisShardSplitReaderSupplier(sourceConfig, shardMetricGroupMap),
+                        new Configuration()),
                 recordEmitter,
                 sourceConfig,
                 readerContext,
@@ -186,7 +191,39 @@ public class KinesisStreamsSource<T>
         return new KinesisStreamsSourceEnumeratorStateSerializer(new KinesisShardSplitSerializer());
     }
 
-    private KinesisStreamProxy createKinesisStreamProxy(Configuration consumerConfig) {
+    private Supplier<SplitReader<Record, KinesisShardSplit>> getKinesisShardSplitReaderSupplier(
+            Configuration sourceConfig,
+            Map<String, KinesisShardMetrics> shardMetricGroupMap) {
+        KinesisStreamsSourceConfigConstants.ConsumerType consumerType =
+                sourceConfig.get(KinesisStreamsSourceConfigConstants.CONSUMER_TYPE);
+
+        switch (consumerType) {
+            case POLLING:
+                return getPollingKinesisShardSplitReaderSupplier(sourceConfig, shardMetricGroupMap);
+            case EFO:
+                return getFanOutKinesisShardSplitReaderSupplier(sourceConfig, shardMetricGroupMap);
+            default:
+                throw new IllegalArgumentException("Consumer type not supported: " + consumerType);
+        }
+    }
+
+    private Supplier<SplitReader<Record, KinesisShardSplit>> getPollingKinesisShardSplitReaderSupplier(
+            Configuration sourceConfig,
+            Map<String, KinesisShardMetrics> shardMetricGroupMap) {
+        return () -> new PollingKinesisShardSplitReader(createKinesisStreamProxy(sourceConfig), shardMetricGroupMap);
+    }
+
+    private Supplier<SplitReader<Record, KinesisShardSplit>> getFanOutKinesisShardSplitReaderSupplier(
+            Configuration sourceConfig,
+            Map<String, KinesisShardMetrics> shardMetricGroupMap) {
+
+        // TODO: manage consumer registration logic
+        String consumerArn = sourceConfig.get(KinesisStreamsSourceConfigConstants.EFO_CONSUMER_ARN);
+
+        return () -> new FanOutKinesisShardSplitReader(shardMetricGroupMap, createKinesisAsyncStreamProxy(sourceConfig), consumerArn);
+    }
+
+    private KinesisStreamProxy createKinesisStreamProxy(Configuration sourceConfig) {
         SdkHttpClient httpClient =
                 AWSGeneralUtil.createSyncHttpClient(
                         AttributeMap.builder().build(), ApacheHttpClient.builder());
@@ -198,7 +235,7 @@ public class KinesisStreamsSource<T>
                                         new IllegalStateException(
                                                 "Unable to determine region from stream arn"));
         Properties kinesisClientProperties = new Properties();
-        consumerConfig.addAllToProperties(kinesisClientProperties);
+        sourceConfig.addAllToProperties(kinesisClientProperties);
         kinesisClientProperties.put(AWSConfigConstants.AWS_REGION, region);
 
         AWSGeneralUtil.validateAwsCredentials(kinesisClientProperties);
@@ -210,6 +247,29 @@ public class KinesisStreamsSource<T>
                         KinesisStreamsConfigConstants.BASE_KINESIS_USER_AGENT_PREFIX_FORMAT,
                         KinesisStreamsConfigConstants.KINESIS_CLIENT_USER_AGENT_PREFIX);
         return new KinesisStreamProxy(kinesisClient, httpClient);
+    }
+
+    private KinesisAsyncStreamProxy createKinesisAsyncStreamProxy(Configuration sourceConfig) {
+        SdkAsyncHttpClient asyncHttpClient =
+                AWSGeneralUtil.createAsyncHttpClient(AttributeMap.builder().build(), NettyNioAsyncHttpClient.builder());
+
+        String region =
+                AWSGeneralUtil.getRegionFromArn(streamArn)
+                        .orElseThrow(
+                                () ->
+                                        new IllegalStateException(
+                                                "Unable to determine region from stream arn"));
+        Properties kinesisClientProperties = new Properties();
+        sourceConfig.addAllToProperties(kinesisClientProperties);
+        kinesisClientProperties.put(AWSConfigConstants.AWS_REGION, region);
+
+        KinesisAsyncClient kinesisAsyncClient =
+                AWSClientUtil.createAwsAsyncClient(kinesisClientProperties,
+                        asyncHttpClient,
+                        KinesisAsyncClient.builder(),
+                        KinesisStreamsConfigConstants.BASE_KINESIS_USER_AGENT_PREFIX_FORMAT,
+                        KinesisStreamsConfigConstants.KINESIS_CLIENT_USER_AGENT_PREFIX);
+        return new KinesisAsyncStreamProxy(kinesisAsyncClient, asyncHttpClient);
     }
 
     private void setUpDeserializationSchema(SourceReaderContext sourceReaderContext)

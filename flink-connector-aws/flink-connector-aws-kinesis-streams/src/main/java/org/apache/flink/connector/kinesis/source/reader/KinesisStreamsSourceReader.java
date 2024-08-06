@@ -24,7 +24,9 @@ import org.apache.flink.configuration.Configuration;
 import org.apache.flink.connector.base.source.reader.RecordEmitter;
 import org.apache.flink.connector.base.source.reader.RecordsWithSplitIds;
 import org.apache.flink.connector.base.source.reader.SingleThreadMultiplexSourceReaderBase;
+import org.apache.flink.connector.base.source.reader.SourceReaderBase;
 import org.apache.flink.connector.base.source.reader.fetcher.SingleThreadFetcherManager;
+import org.apache.flink.connector.base.source.reader.fetcher.SplitFetcherManager;
 import org.apache.flink.connector.base.source.reader.synchronization.FutureCompletingBlockingQueue;
 import org.apache.flink.connector.kinesis.source.event.SplitsFinishedEvent;
 import org.apache.flink.connector.kinesis.source.metrics.KinesisShardMetrics;
@@ -46,7 +48,7 @@ import java.util.Map;
  */
 @Internal
 public class KinesisStreamsSourceReader<T>
-        extends SingleThreadMultiplexSourceReaderBase<
+        extends SourceReaderBase<
                 Record, T, KinesisShardSplit, KinesisShardSplitState> {
 
     private static final Logger LOG = LoggerFactory.getLogger(KinesisStreamsSourceReader.class);
@@ -54,7 +56,7 @@ public class KinesisStreamsSourceReader<T>
 
     public KinesisStreamsSourceReader(
             FutureCompletingBlockingQueue<RecordsWithSplitIds<Record>> elementsQueue,
-            SingleThreadFetcherManager<Record, KinesisShardSplit> splitFetcherManager,
+            SplitFetcherManager<Record, KinesisShardSplit> splitFetcherManager,
             RecordEmitter<Record, T, KinesisShardSplitState> recordEmitter,
             Configuration config,
             SourceReaderContext context,

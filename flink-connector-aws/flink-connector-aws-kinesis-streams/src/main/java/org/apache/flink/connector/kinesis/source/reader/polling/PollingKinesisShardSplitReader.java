@@ -52,7 +52,9 @@ public class PollingKinesisShardSplitReader extends KinesisShardSplitReaderBase 
         boolean isCompleted = getRecordsResponse.nextShardIterator() == null;
 
         return new RecordBatch(
-                getRecordsResponse.records(), getRecordsResponse.millisBehindLatest(), isCompleted);
+                getRecordsResponse.records(),
+                getRecordsResponse.millisBehindLatest(),
+                isCompleted);
     }
 
     @Override
